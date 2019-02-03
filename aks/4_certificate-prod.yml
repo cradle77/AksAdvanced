@@ -1,0 +1,17 @@
+apiVersion: certmanager.k8s.io/v1alpha1
+kind: Certificate
+metadata:
+  name: tls-people-secret
+spec:
+  secretName: tls-people-secret
+  dnsNames:
+  - ... your domain here ...
+  acme:
+    config:
+    - http01:
+        ingressClass: addon-http-application-routing
+      domains:
+      - ... your domain here ...
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer

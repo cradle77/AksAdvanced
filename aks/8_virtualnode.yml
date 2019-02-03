@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: Service
+metadata: 
+  name: backend
+  labels:
+    app: peopledemo
+    prom: backend
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: backend
+---
+apiVersion: v1
+kind: Service
+metadata: 
+  name: frontend
+  labels:
+    app: peopledemo
+    prom: frontend
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: frontend
+---
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      dnsPolicy: "None"
+      dnsConfig:
+        nameservers:
+          - 10.0.0.10
+          - 8.8.8.8
+        searches:
+          - default.svc.cluster.local
+          - svc.cluster.local 
+          - cluster.local
+        options:
+          - name: ndots
+            value: "5"
+      imagePullSecrets:
+      - name: desdemoregistry
+      containers:
+      - name: backend
+        image: desdemoregistry.azurecr.io/adv/backend:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: ConnectionStrings__mongo
+          value: ... your connectionstring here ...
+      nodeSelector:
+        kubernetes.io/role: agent
+        beta.kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+      - key: virtual-kubelet.io/provider
+        operator: Exists
+      - key: azure.com/aci
+        effect: NoSchedule
+---
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      dnsPolicy: "None"
+      dnsConfig:
+        nameservers:
+          - 10.0.0.10
+          - 8.8.8.8
+        searches:
+          - default.svc.cluster.local
+          - svc.cluster.local 
+          - cluster.local
+        options:
+          - name: ndots
+            value: "5"
+      imagePullSecrets:
+        - name: desdemoregistry
+      containers:
+      - name: frontend
+        image: desdemoregistry.azurecr.io/adv/frontend:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: cache__redis
+          value: ... your connectionstring here ...
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Development"
+        - name: isInCluster
+          value: "true"
+        resources:
+          limits:
+            cpu: 50m
+      nodeSelector:
+        kubernetes.io/role: agent
+        beta.kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+      - key: virtual-kubelet.io/provider
+        operator: Exists
+      - key: azure.com/aci
+        effect: NoSchedule
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: people
+  annotations:
+    kubernetes.io/ingress.class: addon-http-application-routing
+spec:
+  tls:
+  - hosts:
+    - ... your domain here ...
+    secretName: tls-people-secret
+  rules:
+  - host: ... your domain here ...
+    http:
+      paths:
+      - backend:
+          serviceName: frontend
+          servicePort: 80
+        path: /

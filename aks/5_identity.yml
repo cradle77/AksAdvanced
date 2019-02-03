@@ -1,0 +1,16 @@
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentity
+metadata:
+  name: demoapp-identity
+spec:
+  type: 0
+  ResourceID: "#{managedIdentityResourceId}#"
+  ClientID: #{managedIdentityClientId}#
+---
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentityBinding
+metadata:
+  name: demoapp-azure-identity-binding
+spec:
+  AzureIdentity: demoapp-identity
+  Selector: "demo"

@@ -1,0 +1,195 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    /* redis parameters */
+    "RedisCachePrefix": {
+      "type": "string",
+      "minLength": 1,
+      "defaultValue": "composedemoredis"
+    },
+    "RedisCacheSKUName": {
+      "type": "string",
+      "allowedValues": [
+        "Basic",
+        "Standard"
+      ],
+      "defaultValue": "Basic"
+    },
+    "RedisCacheSKUFamily": {
+      "type": "string",
+      "allowedValues": [
+        "C"
+      ],
+      "defaultValue": "C"
+    },
+    "RedisCacheSKUCapacity": {
+      "type": "int",
+      "allowedValues": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "defaultValue": 0
+    },
+    "RedisCacheRedisVersion": {
+      "type": "string",
+      "allowedValues": [
+        "2.8"
+      ],
+      "defaultValue": "2.8"
+    },
+    /* cosmosdb parameters */
+    "apiType": {
+      "type": "string",
+      "metadata": {
+        "description": "The Azure Cosmos DB API type, by default Cassandra; otherwise one of Gremlin, MongoDB, SQL, or Table"
+      },
+      "allowedValues": [
+        "Cassandra",
+        "Gremlin",
+        "MongoDB",
+        "SQL",
+        "Table"
+      ],
+      "defaultValue": "MongoDB"
+    },
+    "databaseAccountPrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "The Azure Cosmos DB account prefix."
+      },
+      "defaultValue": "composedemodb"
+    },
+    /* managed identity parameters */
+    "managedIdentityName": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the managed identity resource"
+      },
+      "defaultValue": "podIdentity"
+    },
+    /* KeyVault parameters */
+    "keyVaultPrefix": {
+      "type": "string",
+      "defaultValue": "aksKeyVault"
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "variables": {
+    "keyVaultName": "[concat(parameters('keyVaultPrefix'), uniqueString(resourceGroup().id))]",
+    "RedisCacheName": "[concat(parameters('RedisCachePrefix'), uniqueString(resourceGroup().id))]",
+    "CosmosDbName": "[concat(parameters('databaseAccountPrefix'), uniqueString(resourceGroup().id))]",
+    "CosmosDbOfferType": "Standard"
+  },
+  "resources": [
+    {
+      "name": "[variables('RedisCacheName')]",
+      "type": "Microsoft.Cache/Redis",
+      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-04-01",
+      "dependsOn": [],
+      "tags": {
+        "displayName": "RedisCache"
+      },
+      "properties": {
+        "sku": {
+          "name": "[parameters('RedisCacheSKUName')]",
+          "family": "[parameters('RedisCacheSKUFamily')]",
+          "capacity": "[parameters('RedisCacheSKUCapacity')]"
+        },
+        "redisVersion": "[parameters('RedisCacheRedisVersion')]"
+      }
+    },
+    {
+      "apiVersion": "2015-04-08",
+      "type": "Microsoft.DocumentDB/databaseAccounts",
+      "kind": "[if(equals(parameters('apiType'), 'MongoDB'), 'MongoDB', 'GlobalDocumentDB')]",
+      "name": "[variables('CosmosDbName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "name": "[variables('CosmosDbName')]",
+        "databaseAccountOfferType": "[variables('CosmosDbOfferType')]"
+      }
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "name": "[parameters('managedIdentityName')]",
+      "apiVersion": "2015-08-31-PREVIEW",
+      "location": "[resourceGroup().location]"
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "name": "[variables('keyVaultName')]",
+      "apiVersion": "2016-10-01",
+      "location": "[resourceGroup().location]",
+      "tags": {},
+      "properties": {
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[parameters('tenantId')]",
+        "accessPolicies": [
+          {
+            "tenantId": "[parameters('tenantId')]",
+            "objectId": "[reference(concat('Microsoft.ManagedIdentity/userAssignedIdentities/', parameters('managedIdentityName')), '2015-08-31-PREVIEW').principalId]",
+            "permissions": {
+              "secrets": [
+                "get"
+              ]
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "name": "[concat(variables('keyVaultName'), '/cosmosdb')]",
+      "apiVersion": "2015-06-01",
+      "properties": {
+        "value": "[concat('mongodb://', variables('CosmosDbName'), ':', listKeys(resourceId('Microsoft.DocumentDb/databaseAccounts', variables('CosmosDbName')), '2015-04-08').primaryMasterKey, '@', variables('CosmosDbName'), '.documents.azure.com:10250/?ssl=true')]"
+      },
+      "dependsOn": [
+        "[concat('Microsoft.KeyVault/vaults/', variables('keyVaultName'))]",
+        "[concat('Microsoft.DocumentDB/databaseAccounts/', variables('CosmosDbName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "name": "[concat(variables('keyVaultName'), '/redis')]",
+      "apiVersion": "2015-06-01",
+      "properties": {
+        "value": "[concat(variables('RedisCacheName'),'.redis.cache.windows.net,abortConnect=false,ssl=true,password=', listKeys(resourceId('Microsoft.Cache/Redis', variables('RedisCacheName')), '2015-08-01').primaryKey)]"
+      },
+      "dependsOn": [
+        "[concat('Microsoft.KeyVault/vaults/', variables('keyVaultName'))]",
+        "[concat('Microsoft.Cache/Redis/', variables('RedisCacheName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "keyVaultUrl": {
+      "type": "string",
+      "value": "[concat('https://', variables('keyVaultName'),'.vault.azure.net/')]"
+    },
+    "identityResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('managedIdentityName'))]"
+    },
+    "identityClientId": {
+      "type": "string",
+      "value": "[reference(concat('Microsoft.ManagedIdentity/userAssignedIdentities/', parameters('managedIdentityName')), '2015-08-31-PREVIEW').clientId]"
+    }
+  }
+}
